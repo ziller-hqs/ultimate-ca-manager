@@ -9,6 +9,14 @@ Starting with v2.48, UCM uses Major.Build versioning (e.g., 2.48, 2.49). Earlier
 
 ## [Unreleased]
 
+### Added
+
+- ACME DNS-01: Plesk XML API instances can manage challenge records with zone-relative record names.
+
+### Fixed
+
+- ACME client: invalid external orders now show the authorization challenge error instead of "Unknown".
+
 ## [2.239] - 2026-10-14
 
 ### Added

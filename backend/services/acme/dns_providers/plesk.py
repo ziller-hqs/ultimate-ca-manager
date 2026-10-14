@@ -215,6 +215,27 @@ class PleskDnsProvider(BaseDnsProvider):
         logger.debug("Matched %s to Plesk site %s (ID %s)", name, site["name"], site["id"])
         return True, site
 
+    @classmethod
+    def _relative_host(cls, record_name: str, zone: str) -> str:
+        record_name = cls._normalise_name(record_name)
+        zone = cls._normalise_name(zone)
+        if record_name == zone:
+            return ""
+        suffix = f".{zone}"
+        if record_name.endswith(suffix):
+            return record_name[:-len(suffix)]
+        return record_name
+
+    @classmethod
+    def _absolute_host(cls, host: str, zone: str) -> str:
+        host = cls._normalise_name(host)
+        zone = cls._normalise_name(zone)
+        if not host or host == "@":
+            return zone
+        if host == zone or host.endswith(f".{zone}"):
+            return host
+        return f"{host}.{zone}"
+
     def create_txt_record(
         self,
         domain: str,
@@ -231,9 +252,11 @@ class PleskDnsProvider(BaseDnsProvider):
             return False, str(site)
 
         packet, operation = self._packet("dns", "add_rec")
+        relative_host = self._relative_host(record_name, site["name"])
+        logger.debug("Plesk: Using zone-relative host %s in site %s", relative_host or "@", site["name"])
         XmlBuilder.SubElement(operation, "site-id").text = str(site["id"])
         XmlBuilder.SubElement(operation, "type").text = "TXT"
-        XmlBuilder.SubElement(operation, "host").text = record_name
+        XmlBuilder.SubElement(operation, "host").text = relative_host
         XmlBuilder.SubElement(operation, "value").text = record_value
 
         success, response = self._request(packet)
@@ -279,7 +302,7 @@ class PleskDnsProvider(BaseDnsProvider):
         record_ids = []
         for result in results:
             record_type = (result.findtext("./data/type") or "").strip().upper()
-            host = self._normalise_name(result.findtext("./data/host"))
+            host = self._absolute_host(result.findtext("./data/host"), site["name"])
             record_id = result.findtext("id")
             if record_type == "TXT" and host == record_name and record_id:
                 record_ids.append(record_id)

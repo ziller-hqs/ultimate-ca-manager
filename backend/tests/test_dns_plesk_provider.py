@@ -182,7 +182,7 @@ class TestCreateTxtRecord:
         operation = packet.find("./dns/add_rec")
         assert operation.findtext("site-id") == "2"
         assert operation.findtext("type") == "TXT"
-        assert operation.findtext("host") == "_acme-challenge.sub.example.com"
+        assert operation.findtext("host") == "_acme-challenge"
         assert operation.findtext("value") == "token<&value"
         assert operation.find("ttl") is None
 
@@ -210,7 +210,7 @@ class TestDeleteTxtRecord:
           <result><status>ok</status><id>12</id><data><site-id>1</site-id><type>TXT</type>
             <host>other.example.com</host><value>keep</value></data></result>
           <result><status>ok</status><id>13</id><data><site-id>1</site-id><type>TXT</type>
-            <host>_acme-challenge.example.com.</host><value>second</value></data></result>
+                        <host>_acme-challenge</host><value>second</value></data></result>
         </get_rec></dns></packet>
         """
         deleted = """

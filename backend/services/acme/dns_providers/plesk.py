@@ -1,12 +1,14 @@
 """Plesk DNS provider using the Plesk XML API."""
 import logging
 import time
+import warnings
 import xml.etree.ElementTree as XmlBuilder
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import defusedxml.ElementTree as SafeXml
 import requests
+from urllib3.exceptions import InsecureRequestWarning
 
 from .base import BaseDnsProvider
 
@@ -29,6 +31,11 @@ class PleskDnsProvider(BaseDnsProvider):
         self.verify_ssl = verify_ssl if isinstance(verify_ssl, bool) else str(verify_ssl).lower() not in {"0", "false", "no"}
         self._sites_cache: Optional[List[Dict[str, Any]]] = None
         logger.info("Plesk DNS provider initialized for %s (verify_tls=%s)", self.endpoint, self.verify_ssl)
+        if not self.verify_ssl:
+            logger.warning(
+                "Plesk TLS certificate verification is disabled for %s; enable it after installing a trusted certificate",
+                self.endpoint,
+            )
 
     @classmethod
     def _build_endpoint(cls, server_url: str) -> str:
@@ -63,13 +70,16 @@ class PleskDnsProvider(BaseDnsProvider):
         started = time.monotonic()
         logger.debug("Plesk XML API %s request to %s", context, self.endpoint)
         try:
-            response = requests.post(
-                self.endpoint,
-                headers=self._headers(),
-                data=payload,
-                timeout=30,
-                verify=self.verify_ssl,
-            )
+            with warnings.catch_warnings():
+                if not self.verify_ssl:
+                    warnings.simplefilter("ignore", InsecureRequestWarning)
+                response = requests.post(
+                    self.endpoint,
+                    headers=self._headers(),
+                    data=payload,
+                    timeout=30,
+                    verify=self.verify_ssl,
+                )
             elapsed_ms = (time.monotonic() - started) * 1000
             if response.status_code >= 400:
                 diagnostic = self._error(response)
@@ -82,6 +92,15 @@ class PleskDnsProvider(BaseDnsProvider):
                 return False, diagnostic
             try:
                 root = SafeXml.fromstring(response.text)
+                packet_error = self._packet_error(root)
+                if packet_error:
+                    logger.error(
+                        "Plesk XML API %s returned an application error after %.0f ms: %s",
+                        context,
+                        elapsed_ms,
+                        packet_error,
+                    )
+                    return False, packet_error
                 logger.debug(
                     "Plesk XML API %s completed with HTTP %s in %.0f ms (%d response chars)",
                     context,
@@ -105,6 +124,23 @@ class PleskDnsProvider(BaseDnsProvider):
                 diagnostic,
             )
             return False, diagnostic
+
+    def _packet_error(self, root: XmlBuilder.Element) -> Optional[str]:
+        """Return errors outside an operator result, such as auth failures."""
+        candidates = [
+            root.find("./system/result"),
+            root.find("./system"),
+            root.find("./result"),
+        ]
+        for node in candidates:
+            if node is None:
+                continue
+            if (node.findtext("status") or "").strip().lower() != "error":
+                continue
+            code = (node.findtext("errcode") or "unknown").strip()
+            text = (node.findtext("errtext") or "Unknown Plesk packet error").strip()
+            return self.redact_secrets(f"Plesk packet error {code}: {text}")
+        return None
 
     def _operation_error(self, result: XmlBuilder.Element) -> str:
         code = (result.findtext("errcode") or "unknown").strip()
@@ -140,6 +176,10 @@ class PleskDnsProvider(BaseDnsProvider):
             return False, response
 
         results = response.findall("./site/get/result")
+        if not results:
+            response_xml = XmlBuilder.tostring(response, encoding="unicode")
+            response_excerpt = self.redact_secrets(response_xml)[:self.MAX_ERROR_BODY_CHARS]
+            logger.debug("Plesk site.get returned no result nodes; response XML: %s", response_excerpt)
         error = self._first_error(results)
         if error:
             logger.error("Plesk site discovery failed: %s", error)
@@ -160,6 +200,13 @@ class PleskDnsProvider(BaseDnsProvider):
         success, sites = self._get_sites()
         if not success:
             return False, sites
+        if not sites:
+            message = (
+                "Plesk returned no accessible sites; verify the API key owner has DNS permissions "
+                "and remote XML API access is enabled"
+            )
+            logger.warning(message)
+            return False, message
         site = self.find_zone(name, sites, key=lambda item: item["name"])
         if not site:
             message = f"Could not find Plesk site for {name}"

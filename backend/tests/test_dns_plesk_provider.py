@@ -100,6 +100,12 @@ class TestTransport:
         assert post.call_args.args[0].endswith("/enterprise/control/agent.php")
         assert post.call_args.kwargs["verify"] is False
 
+    def test_tls_opt_out_logs_controlled_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="services.acme.dns_providers.plesk"):
+            PleskDnsProvider({**CREDS, "verify_ssl": False})
+
+        assert "TLS certificate verification is disabled" in caplog.text
+
     def test_rejects_malformed_url(self):
         with pytest.raises(ValueError, match="valid HTTP or HTTPS URL"):
             PleskDnsProvider({**CREDS, "server_url": "plesk.example.com"})
@@ -126,6 +132,33 @@ class TestTransport:
         assert "Plesk API error 1006" in caplog.text
         assert "Invalid XML response" in caplog.text
         assert CREDS["api_key"] not in caplog.text
+
+    def test_reports_packet_level_system_error(self, provider, caplog):
+        response = """
+        <packet version="1.6.9.1"><system><status>error</status><errcode>1003</errcode>
+          <errtext>Authentication failed</errtext></system></packet>
+        """
+        with caplog.at_level(logging.ERROR, logger="services.acme.dns_providers.plesk"):
+            with patch("services.acme.dns_providers.plesk.requests.post", return_value=_response(response)):
+                ok, message = provider.test_connection()
+
+        assert not ok
+        assert "packet error 1003" in message
+        assert "Authentication failed" in message
+        assert message.removeprefix("Connection failed: ") in caplog.text
+
+    def test_empty_site_list_returns_actionable_message(self, provider):
+        with patch(
+            "services.acme.dns_providers.plesk.requests.post",
+            return_value=_response(_sites_response()),
+        ):
+            ok, message = provider.create_txt_record(
+                "example.com", "_acme-challenge.example.com", "value"
+            )
+
+        assert not ok
+        assert "no accessible sites" in message.lower()
+        assert "DNS permissions" in message
 
 
 class TestCreateTxtRecord:

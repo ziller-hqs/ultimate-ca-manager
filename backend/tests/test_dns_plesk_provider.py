@@ -1,4 +1,5 @@
 """Tests for the Plesk XML API DNS provider."""
+import logging
 from unittest.mock import MagicMock, patch
 
 import defusedxml.ElementTree as ET
@@ -61,12 +62,13 @@ class TestRegistration:
 
 
 class TestTransport:
-    def test_posts_xml_to_plesk_endpoint(self, provider):
-        with patch(
-            "services.acme.dns_providers.plesk.requests.post",
-            return_value=_response(_sites_response((1, "example.com"))),
-        ) as post:
-            ok, message = provider.test_connection()
+    def test_posts_xml_to_plesk_endpoint(self, provider, caplog):
+        with caplog.at_level(logging.DEBUG, logger="services.acme.dns_providers.plesk"):
+            with patch(
+                "services.acme.dns_providers.plesk.requests.post",
+                return_value=_response(_sites_response((1, "example.com"))),
+            ) as post:
+                ok, message = provider.test_connection()
 
         assert ok, message
         assert "example.com" in message
@@ -79,6 +81,9 @@ class TestTransport:
         packet = ET.fromstring(call.kwargs["data"])
         assert packet.find("./site/get/filter") is not None
         assert packet.find("./site/get/dataset/gen_info") is not None
+        assert "site.get" in caplog.text
+        assert "HTTP 200" in caplog.text
+        assert CREDS["api_key"] not in caplog.text
 
     def test_accepts_full_endpoint_and_tls_opt_out(self):
         provider = PleskDnsProvider({
@@ -99,7 +104,7 @@ class TestTransport:
         with pytest.raises(ValueError, match="valid HTTP or HTTPS URL"):
             PleskDnsProvider({**CREDS, "server_url": "plesk.example.com"})
 
-    def test_handles_http_xml_and_parse_errors_without_leaking_key(self, provider):
+    def test_handles_http_xml_and_parse_errors_without_leaking_key(self, provider, caplog):
         responses = [
             _response(f"refused {CREDS['api_key']}", 401, "Unauthorized"),
             _response("<packet><site><get><result><status>error</status><errcode>1006</errcode>"
@@ -107,15 +112,20 @@ class TestTransport:
                       "</result></get></site></packet>"),
             _response("not xml"),
         ]
-        with patch("services.acme.dns_providers.plesk.requests.post", side_effect=responses):
-            http_ok, http_message = provider.test_connection()
-            xml_ok, xml_message = provider.test_connection()
-            parse_ok, parse_message = provider.test_connection()
+        with caplog.at_level(logging.DEBUG, logger="services.acme.dns_providers.plesk"):
+            with patch("services.acme.dns_providers.plesk.requests.post", side_effect=responses):
+                http_ok, http_message = provider.test_connection()
+                xml_ok, xml_message = provider.test_connection()
+                parse_ok, parse_message = provider.test_connection()
 
         assert not http_ok and CREDS["api_key"] not in http_message and "***" in http_message
         assert not xml_ok and "1006" in xml_message and "Permission denied" in xml_message
         assert CREDS["api_key"] not in xml_message and "***" in xml_message
         assert not parse_ok and "XML" in parse_message
+        assert "HTTP 401 Unauthorized" in caplog.text
+        assert "Plesk API error 1006" in caplog.text
+        assert "Invalid XML response" in caplog.text
+        assert CREDS["api_key"] not in caplog.text
 
 
 class TestCreateTxtRecord:
@@ -143,15 +153,17 @@ class TestCreateTxtRecord:
         assert operation.findtext("value") == "token<&value"
         assert operation.find("ttl") is None
 
-    def test_reports_unknown_zone(self, provider):
-        with patch(
-            "services.acme.dns_providers.plesk.requests.post",
-            return_value=_response(_sites_response((1, "example.com"))),
-        ):
-            ok, message = provider.create_txt_record("unknown.test", "_acme-challenge.unknown.test", "value")
+    def test_reports_unknown_zone(self, provider, caplog):
+        with caplog.at_level(logging.WARNING, logger="services.acme.dns_providers.plesk"):
+            with patch(
+                "services.acme.dns_providers.plesk.requests.post",
+                return_value=_response(_sites_response((1, "example.com"))),
+            ):
+                ok, message = provider.create_txt_record("unknown.test", "_acme-challenge.unknown.test", "value")
 
         assert not ok
         assert "Could not find Plesk site" in message
+        assert message in caplog.text
 
 
 class TestDeleteTxtRecord:

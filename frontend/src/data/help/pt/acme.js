@@ -26,6 +26,7 @@ export default {
           { label: 'Provedores DNS', text: 'Configurar provedores de desafio DNS-01 (Cloudflare, Route53, Tencent DNSPod, etc.)' },
           { label: 'Comando Personalizado', text: 'Tipo de provedor DNS que executa comandos locais configurados pelo admin para criar/excluir TXT, detalhes do registro passados via variáveis de ambiente DOMAIN, RECORD_NAME, RECORD_VALUE, TTL, ACTION. Caminho absoluto do binário obrigatório, sem shell, timeout configurável' },
           { label: 'Domínios', text: 'Mapear domínios para provedores DNS para validação automática' },
+          { label: 'HTTP-01', text: 'O UCM serve o arquivo de desafio dos seus pedidos pendentes em /.well-known/acme-challenge/ na porta do protocolo HTTP (8080 por padrão): encaminhe esse caminho da porta 80 do domínio para o UCM. Verificar confere primeiro o arquivo, e os pedidos HTTP-01 são renovados automaticamente' },
         ]
       },
       {
@@ -69,10 +70,10 @@ export default {
       {
         title: 'Resolvedores DNS personalizados (DNS-01)',
         items: [
-          { label: 'Override por conta', text: 'Sobrescrever resolvedores do sistema ao validar registros TXT _acme-challenge' },
+          { label: 'Modo', text: 'ACME → Let\'s Encrypt → resolvedores DNS-01: Automático (listados, autoritativos, públicos e depois do sistema), Somente resolvedor do sistema ou Somente resolvedores listados. Os modos restritos nunca consultam resolvedores públicos, para redes que os bloqueiam' },
           { label: 'Split-horizon', text: 'Útil quando seu servidor autoritativo é interno mas a visão pública é cacheada em outro lugar' },
           { label: 'Registros obsoletos', text: 'Evita o cache de resolvedores públicos durante renovações automáticas rápidas' },
-          { label: 'Entradas host:port', text: 'Resolvedores que não escutam na porta 53 são aceitos (ex. um BIND ou dnsmasq somente em loopback numa porta alternativa): separados por vírgula, IPs simples continuam funcionando' },
+          { label: 'Entradas host:port', text: 'IPs separados por vírgula com porta opcional (127.0.0.1:5353, [2001:db8::53]:5300), cada resolvedor mantendo a sua porta: ex. um BIND ou dnsmasq somente em loopback numa porta alternativa' },
         ]
       },
       {
@@ -239,7 +240,10 @@ Para serviços DNS sem driver nativo, o provedor **Comando Personalizado** execu
 O comando requer um **caminho absoluto do binário**, executa sem shell (sem pipes nem expansão) e é encerrado após um timeout configurável (5–300 s, padrão 60). Use um pequeno script wrapper para integrar qualquer ferramenta DNS externa.
 
 ### Resolvedores DNS personalizados
-Opcionalmente sobrescreva os resolvedores usados para verificar os registros TXT \`_acme-challenge\` (útil para DNS split-horizon ou para evitar o cache de resolvedores públicos). As entradas são separadas por vírgula e aceitam IPs simples ou \`host:port\`: ex. um BIND somente em loopback ou uma instância dnsmasq numa porta alternativa.
+**Resolvedores DNS-01** define onde o UCM procura os registros TXT \`_acme-challenge\`: **Automático** (resolvedores listados, depois os servidores autoritativos da zona, depois os resolvedores públicos, depois o resolvedor do sistema), **Somente resolvedor do sistema** ou **Somente resolvedores listados**. Os modos restritos nunca consultam resolvedores públicos, para redes que os bloqueiam. As entradas são IPs separados por vírgula com porta opcional, ex. \`127.0.0.1:5353\` ou \`[2001:db8::53]:5300\`.
+
+### Desafios HTTP-01
+O UCM serve o arquivo de desafio dos seus pedidos pendentes em \`/.well-known/acme-challenge/<token>\`, na porta do protocolo HTTP (8080 por padrão). A CA o busca na porta 80 do domínio, então encaminhe esse caminho para o UCM a partir do seu proxy reverso, ou associe o UCM à porta 80. **Verify Challenge** busca o arquivo primeiro e não envia quando ele não é servido; **Force verification** envia mesmo assim. Os pedidos HTTP-01 são renovados automaticamente.
 
 ### Domínios
 Mapeie seus domínios para provedores DNS. Ao solicitar um certificado para um domínio, o UCM usa o provedor mapeado para criar registros de desafio DNS-01.

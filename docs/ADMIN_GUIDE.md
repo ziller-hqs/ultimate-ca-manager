@@ -477,6 +477,42 @@ View ACME accounts and orders in the ACME page, or via API:
 curl -k -b cookies.txt https://localhost:8443/api/v2/acme/accounts
 ```
 
+### ACME client: HTTP-01 challenges
+
+UCM serves the HTTP-01 file of its own pending orders at
+`/.well-known/acme-challenge/<token>`, on the HTTP protocol port (8080 by
+default) as well as on HTTPS. The CA always fetches it on port **80** of the
+domain being certified, so make that path reach UCM:
+
+- **Reverse proxy** in front of the domain: forward `/.well-known/acme-challenge/`
+  to `http://<ucm-host>:8080`.
+- **Port 80 on UCM itself**: same options as for CDP/OCSP above (systemd
+  capability, or `-p 80:8080` with Docker).
+
+Before submitting a challenge, UCM fetches the URL itself and refuses to submit
+when the file is not served; *Force verification* bypasses this check when
+UCM's view of the domain differs from the CA's (split-horizon DNS). Automatic
+renewal of an HTTP-01 order relies on this hosting: when the URL does not
+answer, the new order is left pending with the reason (the next attempt reuses
+it), and the failure is recorded in the audit log.
+
+### ACME DNS-01 resolvers
+
+**ACME → Let's Encrypt → DNS-01 resolvers** chooses where UCM looks up
+`_acme-challenge` TXT records, for the client, the proxy and the ACME server:
+
+| Mode | Resolvers queried |
+|------|-------------------|
+| Automatic (default) | listed resolvers, then the zone's authoritative servers, then 9.9.9.9 / 8.8.8.8 / 1.1.1.1, then the system resolver |
+| System resolver only | `/etc/resolv.conf` |
+| Listed resolvers only | the list below |
+
+Use a restricted mode when outbound DNS to public resolvers is blocked; the
+public-endpoints preflight then skips its public DNS check as well. Entries
+are comma-separated IPs with an optional port: `10.0.0.53, 127.0.0.1:5353,
+[2001:db8::53]:5300`. API: `dns01_resolver_mode` and `dns01_nameservers` on
+`PATCH /api/v2/acme/client/settings`.
+
 ### ACME client accounts: `preferred_chain` (RFC 8555 alternate chains)
 
 UCM can select an *alternate* chain advertised by the CA via `Link: rel="alternate"` (RFC 8555 §7.4.2). This choice is driven by the `preferred_chain` field on **ACME client accounts**.

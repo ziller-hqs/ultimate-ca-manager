@@ -584,6 +584,7 @@ export const helpContent = {
           { label: 'DNS Providers', text: 'Configure DNS-01 challenge providers (Cloudflare, Route53, Tencent DNSPod, etc.)' },
           { label: 'Custom Command', text: 'DNS provider type running admin-configured local commands for TXT create/delete, record details passed via DOMAIN, RECORD_NAME, RECORD_VALUE, TTL, ACTION environment variables. Absolute binary path required, no shell, configurable timeout' },
           { label: 'Domains', text: 'Map domains to DNS providers for automatic validation' },
+          { label: 'HTTP-01', text: 'UCM serves the challenge file of its pending orders at /.well-known/acme-challenge/ on the HTTP protocol port (8080 by default): forward that path from port 80 of the domain to UCM. Verify checks the file first, and HTTP-01 orders renew automatically' },
         ]
       },
       {
@@ -631,10 +632,10 @@ export const helpContent = {
         title: 'Custom DNS Resolvers (DNS-01)',
         icon: Globe,
         items: [
-          { label: 'Per-account override', text: 'Override system resolvers when validating _acme-challenge TXT records' },
+          { label: 'Mode', text: 'ACME → Let\'s Encrypt → DNS-01 resolvers: Automatic (listed, authoritative, public, then system), System resolver only, or Listed resolvers only. The restricted modes never query public resolvers, for networks that block them' },
           { label: 'Split-horizon', text: 'Useful when your authoritative server is internal but the public view is cached elsewhere' },
           { label: 'Stale records', text: 'Avoids public-resolver caching during fast automated renewals' },
-          { label: 'host:port entries', text: 'Resolvers not listening on port 53 are accepted (e.g. a loopback-only BIND or dnsmasq on an alternate port): comma-separated, plain IPs still work' },
+          { label: 'host:port entries', text: 'Comma-separated IPs with an optional port (127.0.0.1:5353, [2001:db8::53]:5300), each resolver keeping its own port: e.g. a loopback-only BIND or dnsmasq on an alternate port' },
         ]
       },
       {

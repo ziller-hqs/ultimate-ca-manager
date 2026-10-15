@@ -20,7 +20,7 @@ class PleskDnsProvider(BaseDnsProvider):
     PROVIDER_NAME = "Plesk"
     PROVIDER_DESCRIPTION = "Plesk XML API (self-hosted)"
     REQUIRED_CREDENTIALS = ["server_url", "api_key"]
-    OPTIONAL_CREDENTIALS = ["verify_ssl"]
+    OPTIONAL_CREDENTIALS = ["verify_ssl", "propagation_delay_seconds"]
 
     API_PATH = "/enterprise/control/agent.php"
 
@@ -29,6 +29,12 @@ class PleskDnsProvider(BaseDnsProvider):
         self.endpoint = self._build_endpoint(self.credentials["server_url"])
         verify_ssl = self.credentials.get("verify_ssl", True)
         self.verify_ssl = verify_ssl if isinstance(verify_ssl, bool) else str(verify_ssl).lower() not in {"0", "false", "no"}
+        try:
+            self.propagation_delay_seconds = int(self.credentials.get("propagation_delay_seconds") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Plesk propagation delay must be a whole number of seconds") from exc
+        if self.propagation_delay_seconds < 0:
+            raise ValueError("Plesk propagation delay must not be negative")
         self._sites_cache: Optional[List[Dict[str, Any]]] = None
         logger.info("Plesk DNS provider initialized for %s (verify_tls=%s)", self.endpoint, self.verify_ssl)
         if not self.verify_ssl:
@@ -274,6 +280,12 @@ class PleskDnsProvider(BaseDnsProvider):
 
         record_id = result.findtext("id")
         logger.info("Plesk: Created TXT record %s", record_name)
+        if self.propagation_delay_seconds:
+            logger.info(
+                "Plesk: Waiting %d second(s) for DNS propagation before continuing",
+                self.propagation_delay_seconds,
+            )
+            time.sleep(self.propagation_delay_seconds)
         suffix = f" (ID {record_id})" if record_id else ""
         return True, f"Record created successfully{suffix}"
 
@@ -372,5 +384,13 @@ class PleskDnsProvider(BaseDnsProvider):
                 "required": False,
                 "default": True,
                 "help": "Disable only when the Plesk server uses an untrusted self-signed certificate",
+            },
+            {
+                "name": "propagation_delay_seconds",
+                "label": "DNS Propagation Delay (seconds)",
+                "type": "text",
+                "required": False,
+                "default": "0",
+                "help": "Wait this long after creating the TXT record before starting ACME validation",
             },
         ]

@@ -52,13 +52,22 @@ class TestRegistration:
         assert metadata["type"] == "plesk"
         assert metadata["name"] == "Plesk"
         schema = metadata["credentials_schema"]
-        assert [field["name"] for field in schema] == ["server_url", "api_key", "verify_ssl"]
+        assert [field["name"] for field in schema] == [
+            "server_url", "api_key", "verify_ssl", "propagation_delay_seconds"
+        ]
         assert schema[1]["type"] == "password"
         assert schema[2]["type"] == "checkbox"
+        assert schema[3]["type"] == "text"
+        assert schema[3]["default"] == "0"
 
     def test_missing_credentials_rejected(self):
         with pytest.raises(ValueError, match="server_url, api_key"):
             PleskDnsProvider({})
+
+    @pytest.mark.parametrize("delay", ["invalid", -1])
+    def test_invalid_propagation_delay_rejected(self, delay):
+        with pytest.raises(ValueError, match="propagation delay"):
+            PleskDnsProvider({**CREDS, "propagation_delay_seconds": delay})
 
 
 class TestTransport:
@@ -185,6 +194,22 @@ class TestCreateTxtRecord:
         assert operation.findtext("host") == "_acme-challenge"
         assert operation.findtext("value") == "token<&value"
         assert operation.find("ttl") is None
+
+    def test_waits_configured_delay_after_successful_create(self):
+        provider = PleskDnsProvider({**CREDS, "propagation_delay_seconds": "15"})
+        responses = [
+            _response(_sites_response((1, "example.com"))),
+            _response("<packet><dns><add_rec><result><status>ok</status><id>42</id>"
+                      "</result></add_rec></dns></packet>"),
+        ]
+        with patch("services.acme.dns_providers.plesk.requests.post", side_effect=responses):
+            with patch("services.acme.dns_providers.plesk.time.sleep") as sleep:
+                ok, message = provider.create_txt_record(
+                    "example.com", "_acme-challenge.example.com", "value"
+                )
+
+        assert ok, message
+        sleep.assert_called_once_with(15)
 
     def test_reports_unknown_zone(self, provider, caplog):
         with caplog.at_level(logging.WARNING, logger="services.acme.dns_providers.plesk"):

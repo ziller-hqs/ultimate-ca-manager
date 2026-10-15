@@ -29,6 +29,7 @@ from services.acme.acme_client_service import (
 from services.audit_service import AuditService
 from services.acme.http01 import wait_for_http01
 from services.acme.dns_selfcheck import (
+    dns_propagation_delay,
     dns_propagation_timeout as _shared_dns_propagation_timeout,
     wait_for_challenges as _shared_wait_for_challenges,
 )
@@ -61,13 +62,14 @@ def _txt_present(name: str, expected: str) -> bool:
     return txt_record_present(name, expected)
 
 
-def _dns_selfcheck(challenges: dict, timeout: int) -> dict:
+def _dns_selfcheck(challenges: dict, timeout: int, delay=None) -> dict:
     """Poll DNS until every dns-01 TXT record is visible, or until timeout.
 
-    Each poll queries configured/authoritative resolvers plus 9.9.9.9, 8.8.8.8
-    and 1.1.1.1 explicitly (logged per resolver). A domain is ready when any of
-    these paths returns the expected TXT. ``timeout == 0`` means "single pass,
-    no loop" (used by the manual verify endpoint for a quick readiness probe).
+    Each poll follows ``acme.dns01_resolver_mode`` (see utils.dns_txt_lookup):
+    in ``auto`` a domain is ready once every authoritative nameserver that
+    answers serves the expected TXT. Readiness is followed by the settle *delay*
+    (default: ``acme.client.dns_propagation_delay``). ``timeout == 0`` means
+    "single pass, no loop".
 
     The auto-poll background path short-circuits *before* calling this when the
     operator-configured ``dns_propagation_timeout`` is 0 ("submit immediately")
@@ -78,7 +80,7 @@ def _dns_selfcheck(challenges: dict, timeout: int) -> dict:
     challenges (no dns_txt_value) are ignored.
     """
     # Keep local wrapper for backwards-compatible tests/imports.
-    return _shared_wait_for_challenges(challenges, timeout)
+    return _shared_wait_for_challenges(challenges, timeout, delay)
 
 
 @bp.route('/api/v2/acme/client/orders', methods=['GET'])
@@ -402,7 +404,8 @@ def verify_challenges(order_id):
             to_check = {d: challenges[d] for d in domains_to_verify
                         if d in challenges and challenges[d].get('dns_txt_value')}
             if to_check:
-                check = _dns_selfcheck(to_check, min(timeout, _MANUAL_VERIFY_MAX_WAIT_SEC))
+                check = _dns_selfcheck(to_check, min(timeout, _MANUAL_VERIFY_MAX_WAIT_SEC),
+                                       min(dns_propagation_delay(), _MANUAL_VERIFY_MAX_WAIT_SEC))
                 if not check['ok']:
                     return success_response(
                         data={'dns_not_ready': True, 'missing': check['missing'],
